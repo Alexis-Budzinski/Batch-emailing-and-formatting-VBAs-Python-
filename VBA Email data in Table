@@ -1,0 +1,87 @@
+VBA
+Sub EmailCasesToRecipient()
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim dict As Object
+    Dim recipient As Variant
+    Dim i As Long
+
+    Dim outlookApp As Object
+    Dim outlookMail As Object
+
+    ' Set the worksheet (generic name)
+    Set ws = ThisWorkbook.Sheets("Data")
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+
+    ' Create dictionary to group rows by recipient
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    ' Loop through rows and build HTML table rows
+    For i = 2 To lastRow
+        Dim email As String
+        email = LCase(Trim(ws.Cells(i, 1).Value)) ' Column A = recipient email
+        If email = "" Then GoTo NextRow
+
+        Dim rowHTML As String
+        rowHTML = "<tr>" & _
+            "<td>" & ws.Cells(i, 2).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 3).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 4).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 5).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 6).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 7).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 8).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 9).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 10).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 11).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 12).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 13).Value & "</td>" & _
+            "<td>" & ws.Cells(i, 14).Value & "</td>" & _
+            "</tr>"
+
+        ' Group rows by recipient
+        If Not dict.Exists(email) Then
+            dict.Add email, rowHTML
+        Else
+            dict(email) = dict(email) & rowHTML
+        End If
+NextRow:
+        Next i
+
+    ' Create Outlook application
+    Set outlookApp = CreateObject("Outlook.Application")
+
+    ' Send email to each recipient
+    For Each recipient In dict.Keys
+        Set outlookMail = outlookApp.CreateItem(0)
+
+        ' Get default signature
+        Dim signature As String
+        Dim tempMail As Object
+        Set tempMail = outlookApp.CreateItem(0)
+        tempMail.Display
+        signature = tempMail.HTMLBody
+        tempMail.Close 0
+
+        ' Build email body with dynamic table
+        Dim htmlBody As String
+        htmlBody = "<html><body>" & _
+            "<p>Hi,</p>" & _
+            "<p>Please find the details below:</p>" & _
+            "<table border='1' cellpadding='6' style='border-collapse:collapse;'>" & _
+            "<tr><th>[TableCol.1]</th><th>[TableCol.2]</th><th>[TableCol.3]</th></tr>" & _
+            dict(recipient) & _
+            "</table>" & _
+            "</body></html>"
+
+        ' Configure and display email
+        With outlookMail
+            .To = recipient
+            .Subject = "Update: Case Details"
+            .HTMLBody = htmlBody & signature
+            .Display ' Change to .Send to send automatically
+        End With
+    Next recipient
+
+    MsgBox "Emails created!"
+End Sub
