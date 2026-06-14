@@ -1,0 +1,250 @@
+Batch Emailing and template population with 
+Option Explicit
+
+' ====== CONFIGURATION ======
+Const SHEET_NAME As String = "EmailData"   ' <-- change to your worksheet tab
+Const TABLE_NAME As String = "emailTable"   ' "" = auto-detect first table; or set e.g. "emailTable"
+Const PREVIEW_MODE As Boolean = True    ' True = open preview (.Display); False = send (.Send)
+Const RESPECT_FILTER As Boolean = True  ' True = skip hidden (filtered-out) rows
+
+' Table header captions (case-insensitive match)
+Const HDR_EMAIL   As String = "email"
+Const HDR_TYPE    As String = "type"
+Const HDR_FN1     As String = "name_1"
+Const HDR_FN2     As String = "name_2"
+Const HDR_ADDR    As String = "info1"
+Const HDR_ADVIS   As String = "info2"
+Const HDR_FIRM    As String = "info3"
+' ==========================
+
+Public Sub EmailEachTableRow_Preview()
+    Dim ans As VbMsgBoxResult
+
+    ans = MsgBox( _
+        "Generate preview emails now?" & vbCrLf & vbCrLf & _
+        "• Click Yes to proceed." & vbCrLf & _
+        "• Click No to cancel.", _
+        vbYesNo + vbQuestion + vbDefaultButton2, _
+        "Confirm: Generate Emails")
+
+    If ans <> vbYes Then Exit Sub
+
+    Dim ws As Worksheet, lo As ListObject, rngBody As Range
+    Dim colEmail As Long, colType As Long, colFN1 As Long, colFN2 As Long
+    Dim colAddr As Long, colAdviser As Long, colFirm As Long
+    Dim r As Range
+    Dim toAddr As String, mType As String
+    Dim fn1 As String, fn2 As String, addr As String, advis As String, firm As String
+    Dim subjectLine As String, htmlBody As String
+    Dim created As Long, skipped As Long
+
+    ' Get worksheet
+    On Error GoTo sheet_err
+    Set ws = ThisWorkbook.Sheets(SHEET_NAME)
+    On Error GoTo 0
+
+    ' Get the table (ListObject)
+    Set lo = GetTargetTable(ws)
+    If lo Is Nothing Then
+        MsgBox "No table (ListObject) found on sheet '" & SHEET_NAME & "'. " & _
+               "Name your table or set TABLE_NAME at the top.", vbExclamation
+        Exit Sub
+    End If
+
+    ' If the table has no data rows, DataBodyRange is Nothing ? exit gracefully
+    If lo.DataBodyRange Is Nothing Then
+        MsgBox "The table '" & lo.Name & "' has no data rows.", vbInformation
+        Exit Sub
+    End If
+    Set rngBody = lo.DataBodyRange
+
+    ' Resolve column indexes by header text
+    colEmail = FindHeader(lo, HDR_EMAIL)
+    colType = FindHeader(lo, HDR_TYPE)
+    colFN1 = FindHeader(lo, HDR_FN1)
+    colFN2 = FindHeader(lo, HDR_FN2)
+    colInfo1 = FindHeader(lo, HDR_INFO1)
+    colInfo2 = FindHeader(lo, HDR_INFO2)
+    colInfo3 = FindHeader(lo, HDR_INFO2)
+
+    If colEmail * colType * colFN1 * colFN2 * coLInfo1 * colInfo2 * colInfo3 = 0 Then
+        MsgBox "Missing required header. Expected (case-insensitive):" & vbCrLf & _
+               "email, type, first_name_1, first_name_2, info1, info2, info3", vbCritical
+        Exit Sub
+    End If
+
+    created = 0: skipped = 0
+    Application.ScreenUpdating = False
+
+    ' Loop each data row in the table
+    For Each r In rngBody.Rows
+        If Not (RESPECT_FILTER And r.EntireRow.Hidden) Then
+
+            toAddr = CleanStr(r.Cells(1, colEmail).Value)
+            mType = LCase$(CleanStr(r.Cells(1, colType).Value))
+            fn1 = CleanStr(r.Cells(1, colFN1).Value)
+            fn2 = CleanStr(r.Cells(1, colFN2).Value)
+            info1 = CleanStr(r.Cells(1, colInfo1).Value)
+            info2 = CleanStr(r.Cells(1, colInfo2).Value)
+            info3 = CleanStr(r.Cells(1, colInfo3).Value)
+
+            If IsLikelyEmail(toAddr) Then
+                subjectLine = BuildSubject(mType, fn1, fn2, addr)
+                If mType = "residential" Then
+                    htmlBody = TemplateGeneric(fn1, fn2, addr, advis, firm, "Residential")
+                Else
+                    htmlBody = TemplateGeneric(fn1, fn2, addr, advis, firm, "Generic")
+                End If
+
+                If ComposeOutlookPreview(toAddr, subjectLine, htmlBody, PREVIEW_MODE) Then
+                    created = created + 1
+                Else
+                    skipped = skipped + 1
+                End If
+            Else
+                skipped = skipped + 1
+            End If
+        End If
+    Next r
+
+    Application.ScreenUpdating = True
+
+    MsgBox "Table: " & lo.Name & vbCrLf & _
+           "Emails created: " & created & vbCrLf & _
+           "Rows skipped (no/invalid email or filtered): " & skipped, vbInformation
+    Exit Sub
+
+sheet_err:
+    MsgBox "Sheet '" & SHEET_NAME & "' not found. Update SHEET_NAME at the top.", vbCritical
+End Sub
+
+' ---------- Outlook compose (Classic Outlook COM) ----------
+Private Function ComposeOutlookPreview( _
+    ByVal toAddr As String, _
+    ByVal subj As String, _
+    ByVal bodyHtml As String, _
+    ByVal preview As Boolean) As Boolean
+
+    Dim olApp As Object, mail As Object, sigHtml As String
+
+    On Error Resume Next
+    Set olApp = GetObject(, "Outlook.Application")
+    If olApp Is Nothing Then Set olApp = CreateObject("Outlook.Application")
+    On Error GoTo 0
+
+    If olApp Is Nothing Then
+        MsgBox "Outlook is not available. Please open Outlook and try again.", vbExclamation
+        ComposeOutlookPreview = False
+        Exit Function
+    End If
+
+    Set mail = olApp.CreateItem(0)            ' 0 = olMailItem
+    With mail
+        .Subject = subj
+        .To = toAddr
+        .BodyFormat = 2                        ' olFormatHTML
+
+        ' 1) Display first so Outlook injects the DEFAULT signature
+        .Display
+
+        ' 2) Read the existing HTML (which now includes the signature)
+        sigHtml = .htmlBody
+
+        ' 3) Prepend your template HTML to the signature HTML
+        .htmlBody = bodyHtml & sigHtml
+
+        If Not preview Then .Send
+    End With
+
+    ComposeOutlookPreview = True
+End Function
+
+' ---------- Templates ----------
+Private Function BuildSubject(ByVal typ As String, ByVal fn1 As String, ByVal fn2 As String, ByVal addr As String) As String
+    Dim fullName As String: fullName = Trim$(fn1 & " " & fn2)
+    BuildSubject = "Important Update Regarding Your Request"
+End Function
+
+Private Function TemplateGeneric( _
+    ByVal fn1 As String, ByVal fn2 As String, _
+    ByVal addr As String, ByVal advis As String, ByVal firm As String, _
+    ByVal templateType As String) As String
+
+    Dim bodyHtml As String
+    bodyHtml = "<html><body style='font-family:Segoe UI, Arial; font-size:11pt;'>"
+
+    bodyHtml = bodyHtml & "<p>Dear " & Html(fn1) & " and " & Html(fn2) & ",</p>"
+    bodyHtml = bodyHtml & "<p>Re: " & Html(addr) & ".</p>"
+
+    bodyHtml = bodyHtml & "<p>Thank you for your request. We are following up to provide you with the information you need.</p>"
+
+    bodyHtml = bodyHtml & "<p>As part of our process, we have identified that additional details may be required. " & _
+               "Please review the attached documents for more information.</p>"
+
+    bodyHtml = bodyHtml & "<p><strong>Attached:</strong></p>"
+    bodyHtml = bodyHtml & "<ul>" & _
+               "  <li><strong>Document 1</strong></li>" & _
+               "  <li><strong>Document 2</strong></li>" & _
+               "</ul>"
+
+    bodyHtml = bodyHtml & "<p>If you have any questions or need further assistance, please reply to this email.</p>"
+
+    bodyHtml = bodyHtml & "<p>Kind regards<br>Your Team</p>"
+
+    bodyHtml = bodyHtml & "</body></html>"
+
+    TemplateGeneric = bodyHtml
+End Function
+
+' ---------- Table helpers ----------
+Private Function GetTargetTable(ByVal ws As Worksheet) As ListObject
+    If Len(TABLE_NAME) > 0 Then
+        On Error Resume Next
+        Set GetTargetTable = ws.ListObjects(TABLE_NAME)
+        On Error GoTo 0
+    Else
+        If ws.ListObjects.Count > 0 Then
+            Set GetTargetTable = ws.ListObjects(1)
+        End If
+    End If
+End Function
+
+Private Function FindHeader(ByVal lo As ListObject, ByVal headerText As String) As Long
+    Dim i As Long
+    If lo Is Nothing Then Exit Function
+    If lo.HeaderRowRange Is Nothing Or lo.ShowHeaders = False Then Exit Function
+
+    For i = 1 To lo.HeaderRowRange.Columns.Count
+        If LCase$(Trim$(lo.HeaderRowRange.Cells(1, i).Value2)) = LCase$(headerText) Then
+            FindHeader = i
+            Exit Function
+        End If
+    Next i
+End Function
+
+' ---------- Utilities ----------
+Private Function Html(ByVal s As String) As String
+    s = Replace(s, "&", "&amp;")
+    s = Replace(s, "<", "&lt;")
+    s = Replace(s, ">", "&gt;")
+    s = Replace(s, """", "&quot;")
+    Html = s
+End Function
+
+Private Function CleanStr(ByVal v As Variant) As String
+    Dim s As String
+    If IsError(v) Then
+        CleanStr = ""
+    Else
+        s = CStr(v)
+        s = Replace(s, vbCr, " ")
+        s = Replace(s, vbLf, " ")
+        s = Application.WorksheetFunction.Trim(s)
+        CleanStr = s
+    End If
+End Function
+
+Private Function IsLikelyEmail(ByVal s As String) As Boolean
+    s = Trim$(s)
+    IsLikelyEmail = (Len(s) > 3 And InStr(1, s, "@") > 1 And InStrRev(s, ".") > InStr(1, s, "@"))
+End Function
