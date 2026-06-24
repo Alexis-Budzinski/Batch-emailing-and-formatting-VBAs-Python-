@@ -1,4 +1,3 @@
-Batch Emailing and template population with 
 Option Explicit
 
 ' ====== CONFIGURATION ======
@@ -12,9 +11,9 @@ Const HDR_EMAIL   As String = "email"
 Const HDR_TYPE    As String = "type"
 Const HDR_FN1     As String = "name_1"
 Const HDR_FN2     As String = "name_2"
-Const HDR_ADDR    As String = "info1"
-Const HDR_ADVIS   As String = "info2"
-Const HDR_FIRM    As String = "info3"
+Const HDR_INFO1   As String = "info1"
+Const HDR_INFO2   As String = "info2"
+Const HDR_INFO3   As String = "info3"
 ' ==========================
 
 Public Sub EmailEachTableRow_Preview()
@@ -31,10 +30,10 @@ Public Sub EmailEachTableRow_Preview()
 
     Dim ws As Worksheet, lo As ListObject, rngBody As Range
     Dim colEmail As Long, colType As Long, colFN1 As Long, colFN2 As Long
-    Dim colAddr As Long, colAdviser As Long, colFirm As Long
+    Dim colInfo1 As Long, colInfo2 As Long, colInfo3 As Long
     Dim r As Range
     Dim toAddr As String, mType As String
-    Dim fn1 As String, fn2 As String, addr As String, advis As String, firm As String
+    Dim fn1 As String, fn2 As String, info1 As String, info2 As String, info3 As String
     Dim subjectLine As String, htmlBody As String
     Dim created As Long, skipped As Long
 
@@ -51,7 +50,7 @@ Public Sub EmailEachTableRow_Preview()
         Exit Sub
     End If
 
-    ' If the table has no data rows, DataBodyRange is Nothing ? exit gracefully
+    ' If the table has no data rows, DataBodyRange is Nothing -> exit gracefully
     If lo.DataBodyRange Is Nothing Then
         MsgBox "The table '" & lo.Name & "' has no data rows.", vbInformation
         Exit Sub
@@ -65,11 +64,11 @@ Public Sub EmailEachTableRow_Preview()
     colFN2 = FindHeader(lo, HDR_FN2)
     colInfo1 = FindHeader(lo, HDR_INFO1)
     colInfo2 = FindHeader(lo, HDR_INFO2)
-    colInfo3 = FindHeader(lo, HDR_INFO2)
+    colInfo3 = FindHeader(lo, HDR_INFO3)
 
-    If colEmail * colType * colFN1 * colFN2 * coLInfo1 * colInfo2 * colInfo3 = 0 Then
+    If colEmail * colType * colFN1 * colFN2 * colInfo1 * colInfo2 * colInfo3 = 0 Then
         MsgBox "Missing required header. Expected (case-insensitive):" & vbCrLf & _
-               "email, type, first_name_1, first_name_2, info1, info2, info3", vbCritical
+               "email, type, name_1, name_2, info1, info2, info3", vbCritical
         Exit Sub
     End If
 
@@ -79,21 +78,20 @@ Public Sub EmailEachTableRow_Preview()
     ' Loop each data row in the table
     For Each r In rngBody.Rows
         If Not (RESPECT_FILTER And r.EntireRow.Hidden) Then
-
-            toAddr = CleanStr(r.Cells(1, colEmail).Value)
-            mType = LCase$(CleanStr(r.Cells(1, colType).Value))
-            fn1 = CleanStr(r.Cells(1, colFN1).Value)
-            fn2 = CleanStr(r.Cells(1, colFN2).Value)
-            info1 = CleanStr(r.Cells(1, colInfo1).Value)
-            info2 = CleanStr(r.Cells(1, colInfo2).Value)
-            info3 = CleanStr(r.Cells(1, colInfo3).Value)
+            toAddr = CleanStr(r.Cells(colEmail).Value)
+            mType = LCase$(CleanStr(r.Cells(colType).Value))
+            fn1 = CleanStr(r.Cells(colFN1).Value)
+            fn2 = CleanStr(r.Cells(colFN2).Value)
+            info1 = CleanStr(r.Cells(colInfo1).Value)
+            info2 = CleanStr(r.Cells(colInfo2).Value)
+            info3 = CleanStr(r.Cells(colInfo3).Value)
 
             If IsLikelyEmail(toAddr) Then
-                subjectLine = BuildSubject(mType, fn1, fn2, addr)
-                If mType = "residential" Then
-                    htmlBody = TemplateGeneric(fn1, fn2, addr, advis, firm, "Residential")
+                subjectLine = BuildSubject(mType, fn1, fn2, info1)
+                If mType = "X" Then
+                    htmlBody = TemplateGeneric(fn1, fn2, info1, info2, info3, "X")
                 Else
-                    htmlBody = TemplateGeneric(fn1, fn2, addr, advis, firm, "Generic")
+                    htmlBody = TemplateGeneric(fn1, fn2, info1, info2, info3, "Generic")
                 End If
 
                 If ComposeOutlookPreview(toAddr, subjectLine, htmlBody, PREVIEW_MODE) Then
@@ -160,21 +158,21 @@ Private Function ComposeOutlookPreview( _
 End Function
 
 ' ---------- Templates ----------
-Private Function BuildSubject(ByVal typ As String, ByVal fn1 As String, ByVal fn2 As String, ByVal addr As String) As String
+Private Function BuildSubject(ByVal typ As String, ByVal fn1 As String, ByVal fn2 As String, ByVal info1 As String) As String
     Dim fullName As String: fullName = Trim$(fn1 & " " & fn2)
-    BuildSubject = "Important Update Regarding Your Request"
+    BuildSubject = "Important Update Regarding " & Html(info1)
 End Function
 
 Private Function TemplateGeneric( _
     ByVal fn1 As String, ByVal fn2 As String, _
-    ByVal addr As String, ByVal advis As String, ByVal firm As String, _
+    ByVal info1 As String, ByVal info2 As String, ByVal info3 As String, _
     ByVal templateType As String) As String
 
     Dim bodyHtml As String
     bodyHtml = "<html><body style='font-family:Segoe UI, Arial; font-size:11pt;'>"
 
     bodyHtml = bodyHtml & "<p>Dear " & Html(fn1) & " and " & Html(fn2) & ",</p>"
-    bodyHtml = bodyHtml & "<p>Re: " & Html(addr) & ".</p>"
+    bodyHtml = bodyHtml & "<p>Re: " & Html(info1) & ".</p>"
 
     bodyHtml = bodyHtml & "<p>Thank you for your request. We are following up to provide you with the information you need.</p>"
 
